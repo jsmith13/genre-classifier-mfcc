@@ -9,13 +9,12 @@ require(dplyr)
 require(tuneR)
 require(seewave)
 require(doParallel)
-setwd("C:/Users/Jake/Desktop")
 set.seed(12481)
 ```
 
 ```{r}
 # import the metadata information, format a little
-music <- read.csv("music library.csv")
+music <- read.csv("https://raw.githubusercontent.com/jsmith13/genre-classifier/master/music_library.csv")
 music <- mutate_all(music, as.character)
 
 # remove entries with length less than or equal to 30 s
@@ -92,7 +91,7 @@ MFCC_descriptors <- foreach (row = 1:1000, .combine = rbind, .packages = c("tune
     
     # store the song title - album - artist
     # replace commas, colons, and semicolons with underscores to avoid interferring with reading the csv
-    descriptors$song <- paste(music_balanced[row, "Title"], music[row, "Album"], music[row, "Artist"], sep = " - ")
+    descriptors$song <- paste(music_balanced[row, "Title"], music_balanced[row, "Album"], music_balanced[row, "Artist"], sep = " - ")
     descriptors$song <- gsub(",", "_", descriptors$song)
     descriptors$song <- gsub(";", "_", descriptors$song)
     descriptors$song <- gsub(":", "_", descriptors$song)
@@ -157,7 +156,7 @@ MFCC_descriptors <- foreach (row = 1001:2000, .combine = rbind, .packages = c("t
     
     # store the song title - album - artist
     # replace commas, colons, and semicolons with underscores to avoid interferring with reading the csv
-    descriptors$song <- paste(music_balanced[row, "Title"], music[row, "Album"], music[row, "Artist"], sep = " - ")
+    descriptors$song <- paste(music_balanced[row, "Title"], music_balanced[row, "Album"], music_balanced[row, "Artist"], sep = " - ")
     descriptors$song <- gsub(",", "_", descriptors$song)
     descriptors$song <- gsub(";", "_", descriptors$song)
     descriptors$song <- gsub(":", "_", descriptors$song)
