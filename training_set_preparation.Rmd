@@ -58,17 +58,13 @@ ggplot(
 ```
 
 ```{r}
-## the decriptors appear reasonably well normally distributed, so we will not transform them non-linearly
-## we will scale the MFCC values to -1 to 1
-
-# find the maximum absolute value of the train set
-MFCC.max <- max(abs(select(MFCC.train, -song, -genre)))
-
-# divide all MFCC values by the train set maximum
-MFCC.train <- mutate_at(MFCC.train, vars(-song, - genre), function(x) {x / MFCC.max})
-MFCC.validation <- mutate_at(MFCC.validation, vars(-song, - genre), function(x) {x / MFCC.max})
-MFCC.test <- mutate_at(MFCC.test, vars(-song, - genre), function(x) {x / MFCC.max})
+## scale MFCC descriptors
+# center the descriptors on mean, scale by standard deviation
+MFCC.train <- mutate_at(MFCC.train, vars(-song, - genre), scale)
+MFCC.validation <- mutate_at(MFCC.validation, vars(-song, - genre), scale)
+MFCC.test <- mutate_at(MFCC.test, vars(-song, - genre), scale)
 ```
+
 
 ```{r}
 ## build X and Y matrices from the training and validation sets
