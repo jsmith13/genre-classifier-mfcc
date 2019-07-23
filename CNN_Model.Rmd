@@ -102,29 +102,30 @@ In each case, we will treat the three regions independently during the convoluti
 We will start by fitting an even simpler test network on just one of the regions, convolving the temporal domain.
 
 ```{r}
+## 1D (time) convolutional neural network using MFCC from just the "beginning" region
 # define the model
 model <- keras_model_sequential()
 model %>%
   # lambda function layer to select the first region
   layer_lambda(function(x) {x[, 1, , ]}, input_shape = dim(X.train)[2:4]) %>%
   # convolution layer 1
-  layer_conv_1d(filters = 100, kernel_size = 10, activation = "relu") %>%
+  layer_conv_1d(filters = 16, kernel_size = 3,  strides = 1, activation = "relu") %>%
   # max pooling layer 1
-  layer_max_pooling_1d(pool_size = 3) %>%
+  layer_max_pooling_1d(pool_size = 4) %>%
+  # batch norm layer 1
+  layer_batch_normalization() %>%
   # convoution layer 2
-  layer_conv_1d(filters = 50, kernel_size = 10, activation = "relu") %>%
+  layer_conv_1d(filters = 16, kernel_size = 5, strides = 1, activation = "relu") %>%
   # max pooling layer 2
-  layer_max_pooling_1d(pool_size = 2) %>%
+  layer_max_pooling_1d(pool_size = 4) %>%
+  # batch norm layer 2
+  layer_batch_normalization() %>%
   # flatten layer
   layer_flatten() %>%
+  # dropout layer
+  layer_dropout(0.5) %>%
   # fully connected layer 1
-  layer_dense(500, activation = "relu") %>%
-  # dropout layer 1
-  layer_dropout(rate = 0.5) %>%
-  # fully connected layer 2
-  layer_dense(500, activation = "relu") %>%
-  # dropout layer 2
-  layer_dropout(rate = 0.5) %>%
+  layer_dense(32, activation = "relu") %>%
   # output layer
   layer_dense(dim(Y.train)[2], activation = "softmax")
   
@@ -135,4 +136,84 @@ model %>%
   fit(model, x = X.train, y = Y.train, epochs = 10, batch_size = 100, validation_data = list(X.validation, Y.validation), verbose = 1)
 ```
 
+This network is overfitting the training set to the point of not learning at all. M. Dong reports having succesfully trained models using CNN architecture with similarly unbalanced data (observations <<< features), however he uses 2D convolution (https://arxiv.org/pdf/1802.09697.pdf). We will try that next.
+
+The 2D CNN directly analogous to the 1D CNN above also overfits tremendously; however, Dong additionally uses the approach of sub-sampling his songs to "generate" additional datapoints with observations > features. We will implement this as well by taking a 3s random sample from each song prior to training each batch.
+
+This adaptation seems to have curtailed the immediate overfitting, but we are still seeing no learing of the validation set at all.
+
+```{r}
+## 2D (time, frequency) convolutional model network using MFCC from just the "beginning" region
+
+# declare function sample_time_domain
+# a data generator to randomly take 3s samples from the pool of available observations
+sample_time_domain <- function(X.data, Y.data, batch.size = dim(X.data)[1]) {
+  # initiate a counter for batches
+  batch <- 1
+  max_batches <- floor(dim(X.data)[1] / batch.size)
+  
+  # initiate a function to sample the data
+  function() {
+    # randomly select an index to train from
+    z <- sample(1:(dim(X.data)[3] - 99), 1)
+    
+    if (batch < max_batches) {
+      # take batch.size observations
+      batch.start <- batch * batch.size
+      batch.end  <- batch * batch.size + batch.size
+      
+      # update the batch counter
+      batch <<- batch + 1
+    }
+    else if (batch == max_batches) {
+      # take as many additional observations as possible
+      batch.start <- batch * batch.size
+      batch.end <- batch * batch.size + (dim(X.data)[1] %% batch.size)
+
+      # reset the batch counter 
+      batch <<- 1
+    }
+      
+    # return the current batch subsetted down to 3s in the time dimension
+    return(list(X.data[batch.start:batch.end, , z:(z + 99), ], Y.data[batch.start:batch.end, ]))
+  }
+}
+
+# define the model
+model <- keras_model_sequential()
+model %>%
+  # lambda function layer to select the first region
+  layer_lambda(function(x) x[, 1, , ], input_shape = c(3, 100, 12)) %>%
+  # lambda function to add a dummy channels dimension (1)
+  layer_lambda(function(x) k_expand_dims(x, 4)) %>%
+  # convolution layer 1
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3),  strides = c(1, 1), activation = "relu") %>%
+  # max pooling layer 1
+  layer_max_pooling_2d(pool_size = c(4, 2)) %>%
+  # batch norm layer 1
+  layer_batch_normalization() %>%
+  # convoution layer 2
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), strides = c(1, 1), activation = "relu") %>%
+  # max pooling layer 2
+  layer_max_pooling_2d(pool_size = c(4, 2)) %>%
+  # batch norm layer 2
+  layer_batch_normalization() %>%
+  # flatten layer
+  layer_flatten() %>%
+  # dropout layer
+  layer_dropout(0.5) %>%
+  # fully connected layer 1
+  layer_dense(32, activation = "relu") %>%
+  # output layer
+  layer_dense(dim(Y.train)[2], activation = "softmax")
+  
+  # compile the model
+  compile(model, loss = "categorical_crossentropy", optimizer = optimizer_rmsprop(), metrics = "accuracy")
+  
+  # fit the model
+  fit_generator(model, sample_time_domain(X.train, Y.train, batch.size = 100), steps_per_epoch = ceiling(dim(X.train)[1] / 100), epochs = 1000, validation_data = sample_time_domain(X.validation, Y.validation, batch.size = 100), validation_steps = ceiling(dim(X.validation)[1] / 100))
+  
+  # fit the model
+#  fit(model, x = X.train, y = Y.train, epochs = 10, batch_size = batch.size, validation_data = list(X.validation, Y.validation), verbose = 1)
+```
 
