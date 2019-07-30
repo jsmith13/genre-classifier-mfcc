@@ -13,76 +13,19 @@ set.seed(12481)
 ```
 
 ```{r}
-# import the metadata information, format a little
-music <- read.csv("https://raw.githubusercontent.com/jsmith13/genre-classifier/master/music_library.csv")
-music <- mutate_all(music, as.character)
-
-# remove entries with length less than or equal to 30 s
-music <- music[as.numeric(as.character(music$Length)) > 30, ]
+# import the metadata information
+music <- data.table::fread("C:/Users/Jake/Desktop/selected_music.csv")
 ```
 
-```{r}
-# collapse genres into ten broader groups
-regenre <- function (x) {
-  pop <- c("Pop", "Power Pop", "R&B", "Siinger/Songwriter", "Singer/Songwriter", "Reggae", "Funk")
-  rock <- c("Blues Rock", "Britpop", "Classic Rock", "Comedy", "Country", "Folk Rock", "New Wave", "Pop Rock", "Rock", "Soundtrack", "Dub")
-  alternative.rock <- c("Alternative", "Alternative Rock", "Gothic Rock", "Grunge", "Hard Rock", "Noise Rock", "Numetal", "Stoner Rock", "Industrial")
-  indie.rock <- c("Downtempo", "Dream Pop", "Indie Rock", "Lo-fi", "Lo-Fi", "Neo-psychedelia", "Neo-pyschedelia", "Neopsychedelia", "Noise Pop", "Post-punk", "Shoegaze", "Slowcore")
-  progressive.rock <- c("Art Rock", "Math Rock", "Post-rock", "Progressive Metal","Power Metal", "Progressive Rock", "Psychedelic Rock", "Space Rock", "Ambient", "Neofolk")
-  metal <- c("Black Metal", "Death Metal", "Doom Metal", "Drone", "Folk Metal", "Grindcore", "Heavy Metal", "Melodic Death Metal", "Metalcore", "Stoner Metal", "Technical Death Metal", "Thrash", "Traditional Metal", "Traditional Metall")
-  punk <- c("Crossover", "Crust", "Emo", "Folk Punk", "Hardcore", "Hardcore Punk", "Pop Punk", "Post-hardcore", "Punk Rock", "Screamo", "Ska", "Sludge")
-  classical <- c("Classical", "Neoclassical")
-  electronic <- c("Dance", "Electronica", "Noise", "Trip-Hop")
-  hip.hop <- c("Hip-Hop", "Hip Hop")
-  
-  meta.genres <- list(pop, rock, alternative.rock, indie.rock, progressive.rock, metal, punk, classical, electronic, hip.hop)
-  
-  if(x %in% pop) {
-    return("pop")
-  } else if (x %in% rock) {
-    return("rock")
-  } else if (x %in% alternative.rock) {
-    return("alternative rock")
-  } else if (x %in% indie.rock) {
-    return("indie rock")
-  } else if (x %in% progressive.rock) {
-    return("progressive rock")
-  } else if (x %in% metal) {
-    return("metal")
-  } else if (x %in% punk) {
-    return("punk")
-  } else if (x %in% classical) {
-    return("classical")
-  } else if (x %in% electronic) {
-    return("electronic")
-  } else if (x %in% hip.hop) {
-    return("hip-hop")
-  }
-}
+Splitting the MFCC descriptors calculation into four parts to work within memory limitations.
 
-music$Genre <- sapply(music$Genre, regenre) %>% as.character()
-
-# remove entries without genre information
-music <- music[music$Genre != "NULL", ]
-
-# create a genre-balanced sampling of 2000 songs longer than 30 s
-music_balanced <- music %>% group_by(Genre) %>% sample_n(200)
-```
-
-```{r}
-# change a filename which contained special character
-music_balanced[162, "Filename"] <- "08 Copy.flac"
-```
-
-Splitting the MFCC descriptors calculation in two to work within memory limitations.
-
-MFCC descriptors - rows 1:1000
 ```{r}
 # start a parallel processing cluster
 cl <- makeCluster(3, type = "SOCK")
 registerDoParallel(cl)
 
-MFCC_descriptors <- foreach (row = 1:1000, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
+## Calculate MFCC descriptors - rows 1:700
+MFCC_descriptors.1 <- foreach (row = 1:700, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
   # declare a vector to hold the descriptors
   descriptors <- rep(NA, 35930)
   names(descriptors) <- c("song", "genre",
@@ -91,27 +34,27 @@ MFCC_descriptors <- foreach (row = 1:1000, .combine = rbind, .packages = c("tune
     
     # store the song title - album - artist
     # replace commas, colons, and semicolons with underscores to avoid interferring with reading the csv
-    descriptors$song <- paste(music_balanced[row, "Title"], music_balanced[row, "Album"], music_balanced[row, "Artist"], sep = " - ")
+    descriptors$song <- paste(music[row, "Title"], music[row, "Album"], music[row, "Artist"], sep = " - ")
     descriptors$song <- gsub(",", "_", descriptors$song)
     descriptors$song <- gsub(";", "_", descriptors$song)
     descriptors$song <- gsub(":", "_", descriptors$song)
     
     # store the genre
-    descriptors$genre <- music_balanced[row, "Genre"]
+    descriptors$genre <- music[row, "Genre"]
     
     # load the wave
     # using mp3 function if mp3
-    if (substr(music_balanced[row, "Filename"], nchar(music_balanced[row, "Filename"]), nchar(music_balanced[row, "Filename"])) == "3") {
-      wave.file <- readMP3(paste(music_balanced[row, "Path"], music_balanced[row, "Filename"], sep = "")) 
+    if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "3") {
+      wave.file <- readMP3(paste(music[row, "Path"], music[row, "Filename"], sep = "")) 
     }
     # using flac function if flac
-    else if (substr(music_balanced[row, "Filename"], nchar(music_balanced[row, "Filename"]), nchar(music_balanced[row, "Filename"])) == "c") {
+    else if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "c") {
       # convert flac to wave
-      wav2flac(paste(music_balanced[row, "Path"], music_balanced[row, "Filename"], sep = ""), reverse = TRUE, path2exe = "C:/Users/Jake/Desktop/")
+      wav2flac(paste(music[row, "Path"], music[row, "Filename"], sep = ""), reverse = TRUE, path2exe = "C:/Users/Jake/Desktop/")
       
       # load wave, then delete the saved wave file
-      wave.file <- readWave(paste(music_balanced[row, "Path"], sub("flac", "wav", music_balanced[row, "Filename"]), sep = ""))
-      file.remove(paste(music_balanced[row, "Path"], sub("flac", "wav", music_balanced[row, "Filename"]), sep = ""))
+      wave.file <- readWave(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
+      file.remove(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
     }
     
   # strip silence
@@ -134,20 +77,16 @@ MFCC_descriptors <- foreach (row = 1:1000, .combine = rbind, .packages = c("tune
   return(descriptors)
 }
 
-# stop parallel processing cluster
-stopCluster(cl)
-
 # save the calculated descriptors
-save(MFCC_descriptors, file = "MFCC_descriptors_part1")
-```
+save(MFCC_descriptors.1, file = "MFCC_descriptors_part1")
 
-MFCC descriptors - rows 1001-2000
-```{r}
-# start a parallel processing cluster
-cl <- makeCluster(3, type = "SOCK")
-registerDoParallel(cl)
+# remove R table from memory 
+rm(MFCC_descriptors.1)
 
-MFCC_descriptors <- foreach (row = 1001:2000, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
+
+
+## Calculate MFCC descriptors - rows 701:1400
+MFCC_descriptors.2 <- foreach (row = 701:1400, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
   # declare a vector to hold the descriptors
   descriptors <- rep(NA, 35930)
   names(descriptors) <- c("song", "genre",
@@ -156,27 +95,27 @@ MFCC_descriptors <- foreach (row = 1001:2000, .combine = rbind, .packages = c("t
     
     # store the song title - album - artist
     # replace commas, colons, and semicolons with underscores to avoid interferring with reading the csv
-    descriptors$song <- paste(music_balanced[row, "Title"], music_balanced[row, "Album"], music_balanced[row, "Artist"], sep = " - ")
+    descriptors$song <- paste(music[row, "Title"], music[row, "Album"], music[row, "Artist"], sep = " - ")
     descriptors$song <- gsub(",", "_", descriptors$song)
     descriptors$song <- gsub(";", "_", descriptors$song)
     descriptors$song <- gsub(":", "_", descriptors$song)
     
     # store the genre
-    descriptors$genre <- music_balanced[row, "Genre"]
+    descriptors$genre <- music[row, "Genre"]
     
     # load the wave
     # using mp3 function if mp3
-    if (substr(music_balanced[row, "Filename"], nchar(music_balanced[row, "Filename"]), nchar(music_balanced[row, "Filename"])) == "3") {
-      wave.file <- readMP3(paste(music_balanced[row, "Path"], music_balanced[row, "Filename"], sep = "")) 
+    if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "3") {
+      wave.file <- readMP3(paste(music[row, "Path"], music[row, "Filename"], sep = "")) 
     }
     # using flac function if flac
-    else if (substr(music_balanced[row, "Filename"], nchar(music_balanced[row, "Filename"]), nchar(music_balanced[row, "Filename"])) == "c") {
+    else if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "c") {
       # convert flac to wave
-      wav2flac(paste(music_balanced[row, "Path"], music_balanced[row, "Filename"], sep = ""), reverse = TRUE, path2exe = "C:/Users/Jake/Desktop/")
+      wav2flac(paste(music[row, "Path"], music[row, "Filename"], sep = ""), reverse = TRUE, path2exe = "C:/Users/Jake/Desktop/")
       
       # load wave, then delete the saved wave file
-      wave.file <- readWave(paste(music_balanced[row, "Path"], sub("flac", "wav", music_balanced[row, "Filename"]), sep = ""))
-      file.remove(paste(music_balanced[row, "Path"], sub("flac", "wav", music_balanced[row, "Filename"]), sep = ""))
+      wave.file <- readWave(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
+      file.remove(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
     }
     
   # strip silence
@@ -199,9 +138,134 @@ MFCC_descriptors <- foreach (row = 1001:2000, .combine = rbind, .packages = c("t
   return(descriptors)
 }
 
-# stop parallel processing cluster
-stopCluster(cl)
+# save the calculated descriptors
+save(MFCC_descriptors.2, file = "MFCC_descriptors_part2")
+
+# remove R table from memory 
+rm(MFCC_descriptors.2)
+
+
+
+## Calculate MFCC descriptors - rows 1401-2100
+MFCC_descriptors.3 <- foreach (row = 1401:2100, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
+  # declare a vector to hold the descriptors
+  descriptors <- rep(NA, 35930)
+  names(descriptors) <- c("song", "genre",
+        outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
+              c("start", "mid", "end"), FUN = paste, sep = "."))
+    
+    # store the song title - album - artist
+    # replace commas, colons, and semicolons with underscores to avoid interferring with reading the csv
+    descriptors$song <- paste(music[row, "Title"], music[row, "Album"], music[row, "Artist"], sep = " - ")
+    descriptors$song <- gsub(",", "_", descriptors$song)
+    descriptors$song <- gsub(";", "_", descriptors$song)
+    descriptors$song <- gsub(":", "_", descriptors$song)
+    
+    # store the genre
+    descriptors$genre <- music[row, "Genre"]
+    
+    # load the wave
+    # using mp3 function if mp3
+    if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "3") {
+      wave.file <- readMP3(paste(music[row, "Path"], music[row, "Filename"], sep = "")) 
+    }
+    # using flac function if flac
+    else if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "c") {
+      # convert flac to wave
+      wav2flac(paste(music[row, "Path"], music[row, "Filename"], sep = ""), reverse = TRUE, path2exe = "C:/Users/Jake/Desktop/")
+      
+      # load wave, then delete the saved wave file
+      wave.file <- readWave(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
+      file.remove(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
+    }
+    
+  # strip silence
+  wave.file <- noSilence(wave.file)
+  
+  # cut three 10 s segments from the wave file centered on approximate quarter points
+  cut.points <- floor(c(1, 2, 3) * 0.25 * length(wave.file))
+  segments <- cbind(cut.points - 5*wave.file@samp.rate, cut.points + 5*wave.file@samp.rate)
+  
+  wave.start <- wave.file[segments[1, 1] : segments [1, 2]]
+  wave.mid <- wave.file[segments[2, 1] : segments [2, 2]]
+  wave.end <- wave.file[segments[3, 1] : segments [3, 2]]
+  
+  # calculate MFCC descriptors
+  # vectorizing the results put them in the appropriate order for the dataframe
+  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start))
+  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid))
+  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end))
+  
+  return(descriptors)
+}
 
 # save the calculated descriptors
-save(MFCC_descriptors, file = "MFCC_descriptors_part2")
+save(MFCC_descriptors.3, file = "MFCC_descriptors_part3")
+
+# remove R table from memory
+rm(MFCC_descriptors.3)
+
+
+
+## Calculate MFCC descriptors - rows 2101-2800
+MFCC_descriptors.4 <- foreach (row = 2101:2800, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
+  # declare a vector to hold the descriptors
+  descriptors <- rep(NA, 35930)
+  names(descriptors) <- c("song", "genre",
+        outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
+              c("start", "mid", "end"), FUN = paste, sep = "."))
+    
+    # store the song title - album - artist
+    # replace commas, colons, and semicolons with underscores to avoid interferring with reading the csv
+    descriptors$song <- paste(music[row, "Title"], music[row, "Album"], music[row, "Artist"], sep = " - ")
+    descriptors$song <- gsub(",", "_", descriptors$song)
+    descriptors$song <- gsub(";", "_", descriptors$song)
+    descriptors$song <- gsub(":", "_", descriptors$song)
+    
+    # store the genre
+    descriptors$genre <- music[row, "Genre"]
+    
+    # load the wave
+    # using mp3 function if mp3
+    if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "3") {
+      wave.file <- readMP3(paste(music[row, "Path"], music[row, "Filename"], sep = "")) 
+    }
+    # using flac function if flac
+    else if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "c") {
+      # convert flac to wave
+      wav2flac(paste(music[row, "Path"], music[row, "Filename"], sep = ""), reverse = TRUE, path2exe = "C:/Users/Jake/Desktop/")
+      
+      # load wave, then delete the saved wave file
+      wave.file <- readWave(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
+      file.remove(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
+    }
+    
+  # strip silence
+  wave.file <- noSilence(wave.file)
+  
+  # cut three 10 s segments from the wave file centered on approximate quarter points
+  cut.points <- floor(c(1, 2, 3) * 0.25 * length(wave.file))
+  segments <- cbind(cut.points - 5*wave.file@samp.rate, cut.points + 5*wave.file@samp.rate)
+  
+  wave.start <- wave.file[segments[1, 1] : segments [1, 2]]
+  wave.mid <- wave.file[segments[2, 1] : segments [2, 2]]
+  wave.end <- wave.file[segments[3, 1] : segments [3, 2]]
+  
+  # calculate MFCC descriptors
+  # vectorizing the results put them in the appropriate order for the dataframe
+  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start))
+  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid))
+  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end))
+  
+  return(descriptors)
+}
+
+# save the calculated descriptors
+save(MFCC_descriptors.4, file = "MFCC_descriptors_part4")
+
+# remove R table from memory
+rm(MFCC_descriptors.4)
+
+# stop parallel processing cluster
+stopCluster(cl)
 ```
