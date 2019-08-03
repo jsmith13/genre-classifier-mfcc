@@ -24,12 +24,13 @@ Splitting the MFCC descriptors calculation into four parts to work within memory
 cl <- makeCluster(3, type = "SOCK")
 registerDoParallel(cl)
 
-## Calculate MFCC descriptors - rows 1:700
+# Calculate MFCC descriptors - rows 1:700
+
 MFCC_descriptors.1 <- foreach (row = 1:700, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
   # declare a vector to hold the descriptors
-  descriptors <- rep(NA, 35930)
+  descriptors <- rep(NA, 191618)
   names(descriptors) <- c("song", "genre",
-        outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
+        outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
               c("start", "mid", "end"), FUN = paste, sep = "."))
     
     # store the song title - album - artist
@@ -70,9 +71,9 @@ MFCC_descriptors.1 <- foreach (row = 1:700, .combine = rbind, .packages = c("tun
   
   # calculate MFCC descriptors
   # vectorizing the results put them in the appropriate order for the dataframe
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start))
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid))
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start, numcep = 64))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid, numcep = 64))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end, numcep = 64))
   
   return(descriptors)
 }
@@ -85,12 +86,13 @@ rm(MFCC_descriptors.1)
 
 
 
-## Calculate MFCC descriptors - rows 701:1400
+# Calculate MFCC descriptors - rows 701:1400
+
 MFCC_descriptors.2 <- foreach (row = 701:1400, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
   # declare a vector to hold the descriptors
-  descriptors <- rep(NA, 35930)
+  descriptors <- rep(NA, 191618)
   names(descriptors) <- c("song", "genre",
-        outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
+        outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
               c("start", "mid", "end"), FUN = paste, sep = "."))
     
     # store the song title - album - artist
@@ -131,9 +133,9 @@ MFCC_descriptors.2 <- foreach (row = 701:1400, .combine = rbind, .packages = c("
   
   # calculate MFCC descriptors
   # vectorizing the results put them in the appropriate order for the dataframe
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start))
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid))
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start, numcep = 64))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid, numcep = 64))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end, numcep = 64))
   
   return(descriptors)
 }
@@ -145,13 +147,13 @@ save(MFCC_descriptors.2, file = "MFCC_descriptors_part2")
 rm(MFCC_descriptors.2)
 
 
-
 ## Calculate MFCC descriptors - rows 1401-2100
+
 MFCC_descriptors.3 <- foreach (row = 1401:2100, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
   # declare a vector to hold the descriptors
-  descriptors <- rep(NA, 35930)
+  descriptors <- rep(NA, 191618)
   names(descriptors) <- c("song", "genre",
-        outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
+        outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
               c("start", "mid", "end"), FUN = paste, sep = "."))
     
     # store the song title - album - artist
@@ -192,9 +194,9 @@ MFCC_descriptors.3 <- foreach (row = 1401:2100, .combine = rbind, .packages = c(
   
   # calculate MFCC descriptors
   # vectorizing the results put them in the appropriate order for the dataframe
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start))
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid))
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start, numcep = 64))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid, numcep = 64))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end, numcep = 64))
   
   return(descriptors)
 }
@@ -206,13 +208,13 @@ save(MFCC_descriptors.3, file = "MFCC_descriptors_part3")
 rm(MFCC_descriptors.3)
 
 
-
 ## Calculate MFCC descriptors - rows 2101-2800
+
 MFCC_descriptors.4 <- foreach (row = 2101:2800, .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
   # declare a vector to hold the descriptors
-  descriptors <- rep(NA, 35930)
+  descriptors <- rep(NA, 191618)
   names(descriptors) <- c("song", "genre",
-        outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
+        outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), 
               c("start", "mid", "end"), FUN = paste, sep = "."))
     
     # store the song title - album - artist
@@ -253,9 +255,9 @@ MFCC_descriptors.4 <- foreach (row = 2101:2800, .combine = rbind, .packages = c(
   
   # calculate MFCC descriptors
   # vectorizing the results put them in the appropriate order for the dataframe
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start))
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid))
-  descriptors[outer(outer(outer("MFCC.V", 1:12, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "start", FUN = paste, sep = ".")] <- c(melfcc(wave.start, numcep = 64))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "mid", FUN = paste, sep = ".")] <- c(melfcc(wave.mid, numcep = 64))
+  descriptors[outer(outer(outer("MFCC.V", 1:64, FUN = paste, sep = ""), 1:998, FUN = paste, sep = "."), "end", FUN = paste, sep = ".")] <- c(melfcc(wave.end, numcep = 64))
   
   return(descriptors)
 }
@@ -265,6 +267,7 @@ save(MFCC_descriptors.4, file = "MFCC_descriptors_part4")
 
 # remove R table from memory
 rm(MFCC_descriptors.4)
+
 
 # stop parallel processing cluster
 stopCluster(cl)
