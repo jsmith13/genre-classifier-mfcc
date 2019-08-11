@@ -149,7 +149,7 @@ This adaptation seems to have curtailed the immediate overfitting, but we are st
 # a data generator to randomly take 3s samples from the pool of available observations
 sample_time_domain <- function(X.data, Y.data, batch.size = dim(X.data)[1]) {
   # initiate a counter for batches
-  batch <- 1
+  batch <- 0
   max_batches <- floor(dim(X.data)[1] / batch.size)
   
   # initiate a function to sample the data
@@ -171,7 +171,7 @@ sample_time_domain <- function(X.data, Y.data, batch.size = dim(X.data)[1]) {
       batch.end <- batch * batch.size + (dim(X.data)[1] %% batch.size)
 
       # reset the batch counter 
-      batch <<- 1
+      batch <<- 0
     }
       
     # return the current batch subsetted down to 3s in the time dimension

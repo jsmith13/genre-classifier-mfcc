@@ -13,7 +13,7 @@ require(ggplot2)
 
 ```{r}
 # load the dataset
-MFCC <- data.table::fread("~/Data/MFCC_descriptors_compiled.csv")
+MFCC <- data.table::fread("./Data/MFCC_descriptors_compiled.csv")
 
 # set seed for reproducible train/test split
 set.seed(998)

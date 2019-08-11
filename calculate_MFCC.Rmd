@@ -1,0 +1,64 @@
+---
+title: "Music Library Dataset Preparation"
+author: Jake Smith
+---
+
+```{r message = FALSE}
+# import required libaries
+require(dplyr)
+require(tuneR)
+require(seewave)
+require(doParallel)
+require(abind)
+set.seed(12481)
+```
+
+```{r}
+# import the metadata information
+music <- data.table::fread("C:/Users/Jake/Desktop/selected_music.csv")
+```
+
+```{r}
+# start a parallel processing cluster
+cl <- makeCluster(3, type = "SOCK")
+registerDoParallel(cl)
+
+# calculate MFCC descriptors
+
+foreach (row = 1:dim(music)[1], .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
+  # load the wave
+  # using mp3 function if mp3
+  if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "3") {
+    wave.file <- readMP3(paste(music[row, "Path"], music[row, "Filename"], sep = "")) 
+  }
+  # using flac function if flac
+  if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "c") {
+    # convert flac to wave
+    wav2flac(paste(music[row, "Path"], music[row, "Filename"], sep = ""), reverse = TRUE, path2exe = "C:/Users/Jake/Desktop/")
+    
+    # load wave, then delete the saved wave file
+    wave.file <- readWave(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
+    file.remove(paste(music[row, "Path"], sub("flac", "wav", music[row, "Filename"]), sep = ""))
+  }
+  
+  # strip silence
+  wave.file <- noSilence(wave.file)
+  
+  # cut three 10 s segments from the wave file centered on approximate quarter points
+  cut.points <- floor(c(1, 2, 3) * 0.25 * length(wave.file))
+  segments <- cbind(cut.points - 5*wave.file@samp.rate, cut.points + 5*wave.file@samp.rate)
+  
+  wave.start <- wave.file[segments[1, 1] : segments [1, 2]]
+  wave.mid <- wave.file[segments[2, 1] : segments [2, 2]]
+  wave.end <- wave.file[segments[3, 1] : segments [3, 2]]
+  
+  # calculate MFCC descriptors
+  descriptors <- sapply(list(wave.start, wave.mid, wave.end), function(x) {melfcc(x, numcep = 64)}, simplify = "array")
+  
+  # save to file
+  save(descriptors, file = paste("./data/", row, ".descriptors", sep = ""))
+}
+
+# stop the parallel cluster
+stopCluster(cl)
+```
