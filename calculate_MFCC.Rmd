@@ -9,13 +9,12 @@ require(dplyr)
 require(tuneR)
 require(seewave)
 require(doParallel)
-require(abind)
 set.seed(12481)
 ```
 
 ```{r}
 # import the metadata information
-music <- data.table::fread("C:/Users/Jake/Desktop/selected_music.csv")
+music <- data.table::fread("./selected_music.csv")
 ```
 
 ```{r}
@@ -25,7 +24,7 @@ registerDoParallel(cl)
 
 # calculate MFCC descriptors
 
-foreach (row = 1:dim(music)[1], .combine = rbind, .packages = c("tuneR", "seewave")) %dopar% {
+foreach (row = 1:dim(music)[1], .packages = c("tuneR", "seewave")) %dopar% {
   # load the wave
   # using mp3 function if mp3
   if (substr(music[row, "Filename"], nchar(music[row, "Filename"]), nchar(music[row, "Filename"])) == "3") {

@@ -1,0 +1,172 @@
+---
+title: "CNN_Model_64"
+author: "Jake Smith"
+date: "8/11/2019"
+---
+
+```{r setup, include=FALSE}
+require(keras)
+require(dplyr)
+```
+
+```{r}
+## train/test split
+# import the metadata information
+music <- data.table::fread("./selected_music.csv")
+
+# convert genres to factor
+music <- music %>% mutate(Genre = as.factor(Genre))
+
+# count number of songs per genre and number of genres
+songs.per.genre <- music %>% group_by(Genre) %>% count()
+genre.count <- dim(songs.per.genre)[1]
+songs.per.genre <- songs.per.genre$n[1]
+
+# set seed for reproducible train/test split
+set.seed(998)
+
+# using an 60/20/20 train/validation/test split stratified by genre
+# divide out 20% of the dataset for the test set
+music.test <- music %>% group_by(Genre) %>% sample_n(0.2 * songs.per.genre) %>% ungroup()
+music.train <- setdiff(music, music.test)
+
+# divide out an additional 20% of the dataset for the validation set
+music.validation <- music.train %>% group_by(Genre) %>% sample_n(0.2 * songs.per.genre) %>% ungroup()
+music.train <- setdiff(music.train, music.validation)
+```
+
+```{r}
+## identify |max| in the descriptors dataset
+# initialize a variable to hold the |max|
+mfcc.maximum <- 0
+
+# loop through MFCC descriptions
+for (i in 1:length(music$Index)) {
+  # load the MFCC descriptors (creates object "descriptors")
+  load(paste("./data/", music$Index[i], ".descriptors", sep = ""))
+  
+  # store |max| in maximum if necessary
+  if (max(abs(descriptors), na.rm = TRUE) > mfcc.maximum) {
+    mfcc.maximum <- max(abs(descriptors), na.rm = TRUE)
+  }
+}
+```
+
+
+```{r}
+## data generator function
+# data.indices: a vector of indices to draw batches from
+# batch.size: the number of observations to return per batch
+data.generator <- function(data.indices, batch.size) {
+  # initiate a counter for batches
+  batch <- 0
+  max.batches <- floor(length(data.indices) / batch.size)
+  
+  # shuffle data.indices
+  data.indices <- sample(data.indices)
+  
+  # initiate a function to sample the data
+  function() {
+    # cycle through batches
+    if (batch < max.batches) {
+      # take batch.size observations
+      batch.start <- batch * batch.size + 1
+      batch.end  <- batch * batch.size + batch.size
+      
+      # update the batch counter
+      batch <<- batch + 1
+      
+    } else if (batch == max.batches) {
+      # take as many additional observations as possible
+      batch.start <- batch * batch.size
+      batch.end <- batch * batch.size + (length(data.indices) %% batch.size)
+
+      # reset the batch counter 
+      batch <<- 0
+    }
+    
+    # generate feature matrix X
+    # load MFCC descriptors for each song in the batch
+    X <- sapply(batch.start:batch.end, function(x) {get(load(paste("./data/", x, ".descriptors", sep = "")))}, simplify = "array")
+    
+    # reorder array into observation > timepoint > octave > region
+    X <- aperm(X, c(4, 1, 2, 3))
+    
+    # scale descriptors to [-1, 1] on an indivual song level
+    X <- apply(X, c(2, 3, 4), function(x) {x / max(abs(x), na.rm = TRUE)})
+    
+    # randomly select a 3s segment of X
+    z <- sample(1:(dim(X)[2] - 99), 1)
+    X <- X[, z:(z+99), , ]
+    
+    # generate one-hot encoded target matrix Y
+    Y <- music$Genre[music$Index %in% data.indices[batch.start:batch.end]]
+    Y <- Y %>% as.numeric() %>% (function(x) {x - 1}) %>% to_categorical(num_classes = genre.count)
+    
+    # return the current batch
+    return(list(X, Y))
+  }
+}
+```
+
+
+```{r}
+## fit the model
+batch.size = 150
+epochs = 50
+reg_lambda = 0.01
+
+# define the model
+model <- keras_model_sequential()
+model %>%
+  # lambda function layer to select the first region
+  layer_lambda(function(x) x[, , , 1], input_shape = c(100, 64, 3)) %>%
+  # lambda function to add a dummy channels dimension (1)
+  layer_lambda(function(x) k_expand_dims(x, 4)) %>%
+  # convolution layer 1
+  layer_conv_2d(
+    filters = 64, 
+    kernel_size = c(3, 3), 
+    strides = c(1, 1), 
+    activation = "relu", 
+    kernel_regularizer = regularizer_l2(reg_lambda)
+  ) %>%
+  # max pooling layer 1
+  layer_max_pooling_2d(pool_size = c(4, 2)) %>%
+  # convoution layer 2
+  layer_conv_2d(
+    filters = 64, 
+    kernel_size = c(5, 3), 
+    strides = c(1, 1), 
+    activation = "relu",
+    kernel_regularizer = regularizer_l2(reg_lambda)
+  ) %>%
+  # max pooling layer 2
+  layer_max_pooling_2d(pool_size = c(4, 2)) %>%
+  # flatten layer
+  layer_flatten() %>%
+  # fully connected layer 1
+  layer_dense(
+    units = 32, 
+    activation = "relu",
+    kernel_regularizer = regularizer_l2(reg_lambda)
+  ) %>%
+  # dropout layer
+  layer_dropout(0.2) %>%
+  # output layer
+  layer_dense(genre.count, activation = "softmax")
+  
+  # compile the model
+  compile(model, loss = "categorical_crossentropy", optimizer = optimizer_adadelta(decay = 1e-5), metrics = "accuracy")
+  
+  # fit the model
+  fit_generator(
+    model, 
+    data.generator(music.train$Index, batch.size), 
+    steps_per_epoch = ceiling(length(music.train$Index) / batch.size), 
+    epochs = epochs, 
+    validation_data = data.generator(music.validation$Index, batch.size), 
+    validation_steps = ceiling(length(music.validation$Index) / batch.size)
+  )
+```
+
