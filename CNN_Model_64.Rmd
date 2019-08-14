@@ -79,8 +79,8 @@ data.generator <- function(data.indices, batch.size) {
     X <- apply(X, c(2, 3, 4), function(x) {x / max(abs(x), na.rm = TRUE)})
     
     # randomly select a 3s segment of X
-    #z <- sample(1:(dim(X)[2] - 99), 1)
-    #X <- X[, z:(z+99), , ]
+    z <- sample(1:(dim(X)[2] - 99), 1)
+    X <- X[, z:(z+99), , ]
     
     # generate one-hot encoded target matrix Y
     Y <- sapply(data.indices[batch.start:batch.end], function(x) {music$Genre[music$Index == x]})
@@ -94,16 +94,16 @@ data.generator <- function(data.indices, batch.size) {
 
 
 ```{r}
-## fit the model
+## define the model
 batch.size = 50
-epochs = 5
+epochs = 50
 reg_lambda = 0.01
 
 # define the model
 model <- keras_model_sequential()
 model %>%
   # lambda function layer to select the first region
-  layer_lambda(function(x) x[, , , 1], input_shape = c(998, 64, 3)) %>%
+  layer_lambda(function(x) x[, , , 1], input_shape = c(100, 64, 3)) %>%
   # lambda function to add a dummy channels dimension (1)
   layer_lambda(function(x) k_expand_dims(x, 4)) %>%
   # convolution layer 1
@@ -134,20 +134,31 @@ model %>%
     activation = "relu",
     kernel_regularizer = regularizer_l2(reg_lambda)
   ) %>%
+  # dropout layer
+  layer_dropout(rate = 0.2) %>%
   # output layer
   layer_dense(genre.count, activation = "softmax")
-  
-  # compile the model
-  compile(model, loss = "categorical_crossentropy", optimizer = optimizer_adadelta(decay = 1e-5), metrics = "accuracy")
-  
-  # fit the model
-  fit_generator(
-    model, 
-    data.generator(music.train$Index, batch.size), 
-    steps_per_epoch = ceiling(length(music.train$Index) / batch.size), 
-    epochs = epochs, 
-    validation_data = data.generator(music.validation$Index, batch.size), 
-    validation_steps = ceiling(length(music.validation$Index) / batch.size)
-  )
+```
+
+
+```{r}
+## fit the model
+# compile the model
+compile(model, 
+        loss = "categorical_crossentropy", 
+        optimizer = optimizer_adadelta(decay = 1e-5), 
+        metrics = "accuracy"
+)
+
+# fit the model
+fit_generator(
+  model, 
+  data.generator(music.train$Index, batch.size), 
+  steps_per_epoch = ceiling(length(music.train$Index) / batch.size), 
+  epochs = epochs, 
+  validation_data = data.generator(music.validation$Index, batch.size), 
+  validation_steps = ceiling(length(music.validation$Index) / batch.size),
+  initial_epoch = 1
+)
 ```
 
