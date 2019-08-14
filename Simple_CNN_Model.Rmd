@@ -1,13 +1,18 @@
 ---
-title: "CNN_Model_64"
+title: "Simple_CNN_Model"
 author: "Jake Smith"
 date: "8/11/2019"
 ---
 
+Fit a simple convolutional neural network. Our data has three "channels" of MFCC descriptors pulled around the 25/50/75th percentile timepoints of the song. We will start by fitting a network on a single channel using the architecture employed by M. Dong (https://arxiv.org/pdf/1802.09697.pdf).
+
 ```{r setup, include=FALSE}
+# import required libraries
 require(keras)
 require(dplyr)
 ```
+
+Using an 80/20/20 train/validation/test split.
 
 ```{r}
 ## train/test split
@@ -35,11 +40,18 @@ music.validation <- music.train %>% group_by(Genre) %>% sample_n(0.2 * songs.per
 music.train <- setdiff(music.train, music.validation)
 ```
 
+The MFCC descriptors are stored in a number of saved R objects. A data generator loads the objects into a feature matrix X batch by batch. Optionally, the generator also truncates each sample to a given length.
+
 ```{r}
 ## data generator function
 # data.indices: a vector of indices to draw batches from
 # batch.size: the number of observations to return per batch
-data.generator <- function(data.indices, batch.size) {
+# subset: an integer number of timepoints down which to truncate each sample
+#         each timepoint corresponds to approximately 10 ms
+#         the starting timepoint for the samples is selected at random for each batch
+#         when subset = 0 (default), the entire sample is used
+# returns batches of data divided into feature matrix X and target matrix Y
+data.generator <- function(data.indices, batch.size, subset = 0) {
   # initiate a counter for batches
   batch <- 0
   max.batches <- ceiling(length(data.indices) / batch.size)
@@ -78,9 +90,12 @@ data.generator <- function(data.indices, batch.size) {
     # scale descriptors to [-1, 1] on an individual song level
     X <- apply(X, c(2, 3, 4), function(x) {x / max(abs(x), na.rm = TRUE)})
     
-    # randomly select a 3s segment of X
-    z <- sample(1:(dim(X)[2] - 99), 1)
-    X <- X[, z:(z+99), , ]
+    # if requested, truncate X
+    if (subset > 0) {
+      # cut sample down to subset datapoints
+      z <- sample(0:(dim(X)[2] - subset), 1)
+      X <- X[, z:(z + subset), , ]
+    }
     
     # generate one-hot encoded target matrix Y
     Y <- sapply(data.indices[batch.start:batch.end], function(x) {music$Genre[music$Index == x]})
@@ -92,18 +107,32 @@ data.generator <- function(data.indices, batch.size) {
 }
 ```
 
+Initial single channel architecture:
+
+input
+slice on region
+add dummy region
+
+2D convolution
+2D max pool
+2D convolution
+2D max pool
+
+flatten
+dense
+dropout
+output
 
 ```{r}
 ## define the model
-batch.size = 50
-epochs = 50
 reg_lambda = 0.01
+sample_length = 998
 
 # define the model
 model <- keras_model_sequential()
 model %>%
   # lambda function layer to select the first region
-  layer_lambda(function(x) x[, , , 1], input_shape = c(100, 64, 3)) %>%
+  layer_lambda(function(x) x[, , , 1], input_shape = c(sample_length, 64, 3)) %>%
   # lambda function to add a dummy channels dimension (1)
   layer_lambda(function(x) k_expand_dims(x, 4)) %>%
   # convolution layer 1
@@ -140,9 +169,12 @@ model %>%
   layer_dense(genre.count, activation = "softmax")
 ```
 
-
 ```{r}
 ## fit the model
+batch.size = 50
+epochs = 20
+starting_epoch = 0
+
 # compile the model
 compile(model, 
         loss = "categorical_crossentropy", 
@@ -153,12 +185,13 @@ compile(model,
 # fit the model
 fit_generator(
   model, 
-  data.generator(music.train$Index, batch.size), 
-  steps_per_epoch = ceiling(length(music.train$Index) / batch.size), 
+  data.generator(music.train$Index, batch.size, sample_length),
+  steps_per_epoch = ceiling(length(music.train$Index) / batch.size),
   epochs = epochs, 
-  validation_data = data.generator(music.validation$Index, batch.size), 
+  validation_data = data.generator(music.validation$Index, batch.size, sample_length), 
   validation_steps = ceiling(length(music.validation$Index) / batch.size),
-  initial_epoch = 1
+  initial_epoch = starting_epoch
 )
 ```
 
+When trained with the entire 10s segment at once, this single channel model gives ~50% validation set accuracy by epoch ~10 before starting to overfit the data. There appears to be an issue with some of the MFCC descriptors in the validation set. Before scaling to the the multi-channel model, we will need to implement a filter in the data generator.
