@@ -50,8 +50,9 @@ The MFCC descriptors are stored in a number of saved R objects. A data generator
 #         each timepoint corresponds to approximately 10 ms
 #         the starting timepoint for the samples is selected at random for each batch
 #         when subset = 0 (default), the entire sample is used
+# na.rm: boolean flag (default TRUE), when true checks for missing values and removes those observations
 # returns batches of data divided into feature matrix X and target matrix Y
-data.generator <- function(data.indices, batch.size, subset = 0) {
+data.generator <- function(data.indices, batch.size, subset = 0, na.rm = TRUE) {
   # initiate a counter for batches
   batch <- 0
   max.batches <- ceiling(length(data.indices) / batch.size)
@@ -61,10 +62,13 @@ data.generator <- function(data.indices, batch.size, subset = 0) {
   
   # initiate a function to sample the data
   function() {
-  
+
     # update the batch counter
     batch <<- batch + 1
-    
+
+    # reset missing observations
+    missing.obs <- c()
+        
     # cycle through batches
     if (batch < max.batches) {
       # take batch.size observations
@@ -87,19 +91,35 @@ data.generator <- function(data.indices, batch.size, subset = 0) {
     # reorder array into observation > timepoint > octave > region
     X <- aperm(X, c(4, 1, 2, 3))
     
+    # if requested and necessary, truncate X
+    if (subset > 0 && subset != dim(X)[2]) {
+      # cut sample down to subset datapoints
+      z <- sample(1:(dim(X)[2] - subset), 1)
+      X <- X[, z:(z + subset - 1), , ]
+    }
+    
+    # if requested, remove observations with missing values
+    if (na.rm == TRUE) {
+      # identify observations with missing values
+      missing.obs <- unique(which(is.na(X) == TRUE, arr.ind = TRUE)[, 1])
+      
+      # remove those observations from X if necessary
+      if (length(missing.obs) > 0) {
+        X <- X[-missing.obs, , , ]
+      }
+    }
+    
     # scale descriptors to [-1, 1] on an individual song level
     X <- apply(X, c(2, 3, 4), function(x) {x / max(abs(x), na.rm = TRUE)})
-    
-    # if requested, truncate X
-    if (subset > 0) {
-      # cut sample down to subset datapoints
-      z <- sample(0:(dim(X)[2] - subset), 1)
-      X <- X[, z:(z + subset), , ]
-    }
     
     # generate one-hot encoded target matrix Y
     Y <- sapply(data.indices[batch.start:batch.end], function(x) {music$Genre[music$Index == x]})
     Y <- Y %>% as.numeric() %>% (function(x) {x - 1}) %>% to_categorical(num_classes = genre.count)
+    
+    # if requested and necessary, remove missing observations from Y
+    if (na.rm == TRUE && length(missing.obs) > 0) {
+      Y <- Y[-missing.obs, ]
+    }
     
     # return the current batch
     return(list(X, Y))
@@ -173,7 +193,7 @@ model %>%
 ## fit the model
 batch.size = 50
 epochs = 20
-starting_epoch = 0
+starting_epoch = 1
 
 # compile the model
 compile(model, 
@@ -194,4 +214,6 @@ fit_generator(
 )
 ```
 
-When trained with the entire 10s segment at once, this single channel model gives ~50% validation set accuracy by epoch ~10 before starting to overfit the data. There appears to be an issue with some of the MFCC descriptors in the validation set. Before scaling to the the multi-channel model, we will need to implement a filter in the data generator.
+When trained with the entire 10s segment at once, this single channel model gives ~50% validation set accuracy by epoch ~10 before starting to overfit the training data.
+
+When trained using 3s segments, this model gives ~50% validation set accuracy by epoch ~7 before starting to overfit the training data.
