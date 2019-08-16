@@ -1,0 +1,249 @@
+---
+title: "Multichannel_CNN_Model"
+author: "Jake Smith"
+date: "8/14/2019"
+---
+
+Expand the single channel model fit in Simple_CNN_Model to include all three channels.
+
+```{r setup, include=FALSE}
+# import required libraries
+require(keras)
+require(dplyr)
+```
+
+Using the identical 80/20/20 train/validation/test split from Simple_CNN_Model.
+
+```{r}
+## train/test split
+# import the metadata information
+music <- data.table::fread("./selected_music.csv")
+
+# convert genres to factor
+music <- music %>% mutate(Genre = as.factor(Genre))
+
+# count number of songs per genre and number of genres
+songs.per.genre <- music %>% group_by(Genre) %>% count()
+genre.count <- dim(songs.per.genre)[1]
+songs.per.genre <- songs.per.genre$n[1]
+
+# set seed for reproducible train/test split
+set.seed(998)
+
+# using an 60/20/20 train/validation/test split stratified by genre
+# divide out 20% of the dataset for the test set
+music.test <- music %>% group_by(Genre) %>% sample_n(0.2 * songs.per.genre) %>% ungroup()
+music.train <- setdiff(music, music.test)
+
+# divide out an additional 20% of the dataset for the validation set
+music.validation <- music.train %>% group_by(Genre) %>% sample_n(0.2 * songs.per.genre) %>% ungroup()
+music.train <- setdiff(music.train, music.validation)
+```
+
+The MFCC descriptors are stored in a number of saved R objects. A data generator loads the objects into a feature matrix X batch by batch. Optionally, the generator also truncates each sample to a given length.
+
+Identical data generator function from Simple_CNN_Model.
+
+```{r}
+## data generator function
+# data.indices: a vector of indices to draw batches from
+# batch.size: the number of observations to return per batch
+# subset: an integer number of timepoints down which to truncate each sample
+#         each timepoint corresponds to approximately 10 ms
+#         the starting timepoint for the samples is selected at random for each batch
+#         when subset = 0 (default), the entire sample is used
+# na.rm: boolean flag (default TRUE), when true checks for missing values and removes those observations
+# returns batches of data divided into feature matrix X and target matrix Y
+data.generator <- function(data.indices, batch.size, subset = 0, na.rm = TRUE) {
+  # initiate a counter for batches
+  batch <- 0
+  max.batches <- ceiling(length(data.indices) / batch.size)
+  
+  # shuffle data.indices
+  data.indices <- sample(data.indices)
+  
+  # initiate a function to sample the data
+  function() {
+
+    # update the batch counter
+    batch <<- batch + 1
+
+    # reset missing observations
+    missing.obs <- c()
+        
+    # cycle through batches
+    if (batch < max.batches) {
+      # take batch.size observations
+      batch.start <- (batch - 1) * batch.size + 1
+      batch.end  <- batch * batch.size
+      
+    } else if (batch == max.batches) {
+      # take as many additional observations as possible
+      batch.start <- (batch - 1) * batch.size + 1
+      batch.end <- length(data.indices)
+
+      # reset the batch counter 
+      batch <<- 0
+    }
+    
+    # generate feature matrix X
+    # load MFCC descriptors for each song in the batch
+    X <- sapply(data.indices[batch.start:batch.end], function(x) {get(load(paste("./data/", x, ".descriptors", sep = "")))}, simplify = "array")
+    
+    # reorder array into observation > timepoint > octave > region
+    X <- aperm(X, c(4, 1, 2, 3))
+    
+    # if requested and necessary, truncate X
+    if (subset > 0 && subset != dim(X)[2]) {
+      # cut sample down to subset datapoints
+      z <- sample(1:(dim(X)[2] - subset), 1)
+      X <- X[, z:(z + subset - 1), , ]
+    }
+    
+    # if requested, remove observations with missing values
+    if (na.rm == TRUE) {
+      # identify observations with missing values
+      missing.obs <- unique(which(is.na(X) == TRUE, arr.ind = TRUE)[, 1])
+      
+      # remove those observations from X if necessary
+      if (length(missing.obs) > 0) {
+        X <- X[-missing.obs, , , ]
+      }
+    }
+    
+    # scale descriptors to [-1, 1] on an individual song level
+    X <- apply(X, c(2, 3, 4), function(x) {x / max(abs(x), na.rm = TRUE)})
+    
+    # generate one-hot encoded target matrix Y
+    Y <- sapply(data.indices[batch.start:batch.end], function(x) {music$Genre[music$Index == x]})
+    Y <- Y %>% as.numeric() %>% (function(x) {x - 1}) %>% to_categorical(num_classes = genre.count)
+    
+    # if requested and necessary, remove missing observations from Y
+    if (na.rm == TRUE && length(missing.obs) > 0) {
+      Y <- Y[-missing.obs, ]
+    }
+    
+    # return the current batch
+    return(list(X, Y))
+  }
+}
+```
+
+Expanding the single channel architecture to three channels
+
+input
+slice on region
+
+-- in triplicate --
+add dummy region
+
+2D convolution
+2D max pool
+2D convolution
+2D max pool
+
+flatten
+-- end triplicate --
+
+concatenate
+dense
+dropout
+output
+
+```{r}
+## define the model
+# input layer 
+reg_lambda = 0.01
+sample_length = 300
+
+# define the model
+# input layer
+input_layer <- layer_input(shape = c(sample_length, 64, 3), name = "input_layer")
+
+
+# initialize a list to hold the regional layers
+regional_layers <- list()
+
+# construct regional layers
+for (i in 1:3) {
+  regional_layers[[i]] <- input_layer %>%
+  # lambda function layer to select the region
+  layer_lambda(function(x) x[, , , 1]) %>%
+  # lambda function to add a dummy channels dimension (1)
+  layer_lambda(function(x) k_expand_dims(x, 4)) %>%
+  # convolution layer 1
+  layer_conv_2d(
+    filters = 64, 
+    kernel_size = c(3, 3), 
+    strides = c(1, 1), 
+    activation = "relu", 
+    kernel_regularizer = regularizer_l2(reg_lambda)
+  ) %>%
+  # max pooling layer 1
+  layer_max_pooling_2d(pool_size = c(4, 2)) %>%
+  # convoution layer 2
+  layer_conv_2d(
+    filters = 64, 
+    kernel_size = c(5, 3), 
+    strides = c(1, 1), 
+    activation = "relu",
+    kernel_regularizer = regularizer_l2(reg_lambda)
+  ) %>%
+  # max pooling layer 2
+  layer_max_pooling_2d(pool_size = c(4, 2)) %>%
+  # flatten layer
+  layer_flatten()
+}
+
+
+# build output layer from three regional layers
+# concatenate flattened regional layers
+output_layers <- layer_average(regional_layers) %>%
+# fully connected layer 1
+layer_dense(
+  units = 32, 
+  activation = "relu", 
+  kernel_regularizer = regularizer_l2(reg_lambda)
+) %>%
+# dropout layer
+layer_dropout(rate = 0.2) %>%
+# output layer
+layer_dense(genre.count, activation = "softmax")
+
+
+# combine input and output layers into a model
+model <- keras_model(inputs = input_layer, outputs = output_layers)
+```
+
+```{r}
+## fit the model
+batch.size = 50
+epochs = 50
+starting_epoch = 0
+
+# compile the model
+compile(model, 
+        loss = "categorical_crossentropy", 
+        optimizer = optimizer_adam(decay = 1e-9), 
+        metrics = "accuracy"
+)
+
+# fit the model
+fit_generator(
+  model, 
+  data.generator(music.train$Index, batch.size, sample_length),
+  steps_per_epoch = ceiling(length(music.train$Index) / batch.size),
+  epochs = epochs, 
+  validation_data = data.generator(music.validation$Index, batch.size, sample_length), 
+  validation_steps = ceiling(length(music.validation$Index) / batch.size),
+  initial_epoch = starting_epoch
+)
+```
+
+Trained for 50 epochs, looks to have equilibrated to ~55% validation accuracy. Validation and training loss still coupled; does not appear to have reached the overfitting regime.
+
+Things to try:
+- gradient descent without decay
+- concatenation in place of joining during merge layer
+- increased capacity, particularly in dense layers
+- decreased regularization
