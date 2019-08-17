@@ -198,10 +198,10 @@ for (i in 1:3) {
 
 # build output layer from three regional layers
 # concatenate flattened regional layers
-output_layers <- layer_average(regional_layers) %>%
+output_layers <- layer_concatenate(regional_layers) %>%
 # fully connected layer 1
 layer_dense(
-  units = 32, 
+  units = 32,
   activation = "relu", 
   kernel_regularizer = regularizer_l2(reg_lambda)
 ) %>%
@@ -244,6 +244,8 @@ Trained for 50 epochs, looks to have equilibrated to ~55% validation accuracy. V
 
 Things to try:
 - gradient descent without decay
-- concatenation in place of joining during merge layer
-- increased capacity, particularly in dense layers
-- decreased regularization
+- concatenation in place of joining during merge layer (improvement to ~60% validation accuracy)
+- increased capacity, particularly in dense layers (no improvement over single 32 unit layer, may be harmful, equilibrate more slowly)
+- decreased regularization (both removal of dropout and decreasing labmda result in loss of performance)
+- change subsampling size (~1s samples give ~50% validation accuracy)
+
