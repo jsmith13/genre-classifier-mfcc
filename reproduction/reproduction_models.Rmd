@@ -1,0 +1,137 @@
+---
+title: "Reproduction Models"
+author: "Jake Smith"
+---
+
+```{r setup, include=FALSE}
+# import required libraries
+require(dplyr)
+require(randomForest)
+require(keras)
+```
+
+Load the dataset of descriptors.
+
+```{r}
+# load the descriptors
+music.descriptors <- data.table::fread("music_descriptors.csv", data.table = FALSE)
+
+# count number of songs per genre and number of genres
+songs.per.genre <- music.descriptors %>% group_by(genre) %>% count()
+genre.count <- dim(songs.per.genre)[1]
+songs.per.genre <- songs.per.genre$n[1]
+```
+
+Format and transform the features as was done in the past.
+
+```{r}
+# function to format/transform the data; taken from previous work
+# takes a dataframe x.df
+format.as.train <- function (x.df) {
+  # generate a list of the parent names for the time-series features
+  features <- unique(sub(pattern = "\\..*", replacement = "", grep("\\..*", colnames(x.df), value = TRUE)))
+
+  # reorder the features such that *.1 through *.10 are in order
+  x.reordered <- x.df[, c("genre", "song", "length", outer(1:10, features, function(x, y) {paste(y, x, sep = ".")}))]
+  
+  # for each pair of time-series features n and n+1, compute |n+1 - n|
+  for (i in 1:length(features)) {
+    for (j in 1:9)
+      x.reordered[, paste(features[i], "dif", j, sep = ".")] <- 
+        abs(x.reordered[, paste(features[i], j+1, sep = ".")] - x.reordered[, paste(features[i], j, sep = ".")])
+  }
+  
+  # log/root transform features with significant right skew
+  x.reordered <- mutate_at(x.reordered, vars(one_of(c("length", 
+           outer(c("kurtosis", "Q25", "roughness", "skewness", "zcr"), 1:10, paste, sep = ".")))), 
+           function(x) {log(x + .0001)})
+  x.reordered <- mutate_at(x.reordered, vars(one_of(c("length", 
+           outer(c("amplitude.dif", "centroid.dif", "entropy.dif", "kurtosis.dif", "Q25.dif", "Q75.dif", "skewness.dif", "zcr.dif"), 1:9, paste, sep = ".")))), 
+           function(x) {(x^(1/4))})
+  x.reordered <- mutate_at(x.reordered, vars(one_of(c("length", 
+           outer("flatness.dif", 1:9, paste, sep = ".")))), 
+           function(x) {(x^(1/2))})
+  x.reordered <- mutate_at(x.reordered, vars(one_of(c("length", 
+           outer("roughness.dif", 1:9, paste, sep = ".")))), 
+           function(x) {(x^(1/10))})
+  
+  # power transform features with significant left skew
+  x.reordered <- mutate_at(x.reordered, vars(one_of(
+           outer(c("entropy"), 1:10, paste, sep = "."))), 
+           function(x) {x^(20)})
+  x.reordered <- mutate_at(x.reordered, vars(one_of(
+           outer(c("flatness"), 1:10, paste, sep = "."))), 
+           function(x) {x^(4)})
+  x.reordered <- mutate_at(x.reordered, vars(one_of(
+           outer(c("Q75"), 1:10, paste, sep = "."))), 
+           function(x) {x^(3)})
+  
+  # scale all numeric features to N(0, 1) distribution
+  # rebuild dataframe with scaled columns
+  x.reordered <- cbind(select(x.reordered, song, genre), sapply(select(x.reordered, -song, - genre), scale))
+  
+  # return the transformed/formatted dataframe
+  return(x.reordered)
+}
+
+# call the function
+music.descriptors <- format.as.train(music.descriptors)
+```
+
+Using the identical 80/20/20 train/validation/test split from Simple_CNN_Model.
+
+```{r}
+## train/test split
+# convert genre to a factor
+music.descriptors <- music.descriptors %>% mutate(genre = as.factor(genre))
+
+# set seed for reproducible train/test split
+set.seed(998)
+
+# using an 60/20/20 train/validation/test split stratified by genre
+# divide out 20% of the dataset for the test set
+music.descriptors.test <- music.descriptors %>% group_by(genre) %>% sample_n(0.2 * songs.per.genre) %>% ungroup()
+music.descriptors.train <- setdiff(music.descriptors, music.descriptors.test)
+
+# divide out an additional 20% of the dataset for the validation set
+music.descriptors.validation <- music.descriptors.train %>% group_by(genre) %>% sample_n(0.2 * songs.per.genre) %>% ungroup()
+music.descriptors.train <- setdiff(music.descriptors.train, music.descriptors.validation)
+```
+
+Fit a random forest model. Using the optimized parameters from the previous dataset rather than retuning.
+
+```{r}
+# fit a random forest model
+randomForest(genre ~ ., data = select(music.descriptors.train, -song), strata = train.set$genre, ntree = 2000, mtry = 70, nodesize = 31)
+```
+
+With the balanced dataset, the random forest model is performing significantly better, giving an out-of-bag accuracy of ~55%, not too far off the optimized CNN model using the MFCC descriptors. It is possible that tuning of the random forest hyperparameters would provide further increases in accuracy.
+
+There is likely at least some information unique to one of the waveform descriptors used here or the MFCC descriptors, and we therefore might expect improved performance from a model using both. We will also test out the simple FFNN fit previously, as it would be straightforward to merge into the CNN model.
+
+```{r}
+# convert the training and validation sets into the matrix format required by keras
+train.set.X <- as.matrix(select(music.descriptors.train, -genre, -song))
+train.set.Y <- to_categorical(as.numeric(music.descriptors.train$genre))
+validation.set.X <- as.matrix(select(music.descriptors.validation, -genre, -song))
+validation.set.Y <- to_categorical(as.numeric(music.descriptors.validation$genre))
+
+# define the model
+model <- keras_model_sequential()
+model %>%
+  layer_dense(units = 50, activation = "relu", input_shape = 191) %>%
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 50, activation = "relu") %>%
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = dim(train.set.Y)[2], activation = "softmax")
+  
+# compile the model
+compile(model, loss = "categorical_crossentropy", optimizer = optimizer_adadelta(), metrics = "accuracy")
+
+# fit the model
+nnet.training <- fit(model, x = train.set.X, y = train.set.Y, 
+                     epochs = 100, initial_epoch = 0, batch_size = 100, verbose = 1,
+                     validation_data = list(validation.set.X, validation.set.Y))
+```
+
+This network reaches ~50% validation accuracy before it begins to overfit.
