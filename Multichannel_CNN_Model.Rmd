@@ -84,6 +84,9 @@ data.generator <- function(data.indices, batch.size, subset = 0, na.rm = TRUE) {
 
       # reset the batch counter 
       batch <<- 0
+      
+      # shuffle sample indices
+      data.indices <<- sample(data.indices)
     }
     
     # generate feature matrix X
@@ -213,13 +216,6 @@ layer_dense(genre.count, activation = "softmax")
 
 # combine input and output layers into a model
 model <- keras_model(inputs = input_layer, outputs = output_layers)
-```
-
-```{r}
-## fit the model
-batch.size = 50
-epochs = 50
-starting_epoch = 0
 
 # compile the model
 compile(model, 
@@ -227,6 +223,13 @@ compile(model,
         optimizer = optimizer_adam(decay = 1e-9), 
         metrics = "accuracy"
 )
+```
+
+```{r}
+## fit the model
+batch.size = 64
+epochs = 50
+starting_epoch = 0
 
 # fit the model
 fit_generator(
@@ -243,9 +246,98 @@ fit_generator(
 Trained for 50 epochs, looks to have equilibrated to ~55% validation accuracy. Validation and training loss still coupled; does not appear to have reached the overfitting regime.
 
 Things to try:
-- gradient descent without decay
 - concatenation in place of joining during merge layer (improvement to ~60% validation accuracy)
+-- remainder with concatenation as baseline--
+- gradient descent without decay (~57% before overfitting)
 - increased capacity, particularly in dense layers (no improvement over single 32 unit layer, may be harmful, equilibrate more slowly)
 - decreased regularization (both removal of dropout and decreasing labmda result in loss of performance)
-- change subsampling size (~1s samples give ~50% validation accuracy)
+- change subsampling size (~1s samples give ~50% validation accuracy) (5s samples gives ~55%)
+
+
+Using the best performing trained network to make predictions on the test set.
+
+```{r}
+## simplified data generator function for the test set
+# data.indices: a vector of indices to draw batches from
+# batch.size: the number of observations to return per batch
+# subset: an integer number of timepoints down which to truncate each sample
+#         each timepoint corresponds to approximately 10 ms
+#         the starting timepoint for the samples is selected at random for each batch
+#         when subset = 0 (default), the entire sample is used
+# na.rm: boolean flag (default TRUE), when true checks for missing values and removes those observations
+# returns batches of data formatted into feature matrix X
+test.data.generator <- function(data.indices, batch.size, subset = 0, na.rm = TRUE) {
+  # initiate a counter for batches
+  batch <- 0
+  max.batches <- ceiling(length(data.indices) / batch.size)
+  
+  # initiate a function to sample the data
+  function() {
+
+    # update the batch counter
+    batch <<- batch + 1
+
+    # reset missing observations
+    missing.obs <- c()
+        
+    # cycle through batches
+    if (batch < max.batches) {
+      # take batch.size observations
+      batch.start <- (batch - 1) * batch.size + 1
+      batch.end  <- batch * batch.size
+      
+    } else if (batch == max.batches) {
+      # take as many additional observations as possible
+      batch.start <- (batch - 1) * batch.size + 1
+      batch.end <- length(data.indices)
+
+      # reset the batch counter 
+      batch <<- 0
+      
+      # shuffle sample indices
+      data.indices <<- sample(data.indices)
+    }
+    
+    # generate feature matrix X
+    # load MFCC descriptors for each song in the batch
+    X <- sapply(data.indices[batch.start:batch.end], function(x) {get(load(paste("./data/", x, ".descriptors", sep = "")))}, simplify = "array")
+    
+    # reorder array into observation > timepoint > octave > region
+    X <- aperm(X, c(4, 1, 2, 3))
+    
+    # if requested and necessary, truncate X
+    if (subset > 0 && subset != dim(X)[2]) {
+      # cut sample down to subset datapoints
+      z <- sample(1:(dim(X)[2] - subset), 1)
+      X <- X[, z:(z + subset - 1), , ]
+    }
+    
+    # if requested, remove observations with missing values
+    if (na.rm == TRUE) {
+      # identify observations with missing values
+      missing.obs <- unique(which(is.na(X) == TRUE, arr.ind = TRUE)[, 1])
+      
+      # remove those observations from X if necessary
+      if (length(missing.obs) > 0) {
+        X <- X[-missing.obs, , , ]
+      }
+    }
+    
+    # scale descriptors to [-1, 1] on an individual song level
+    X <- apply(X, c(2, 3, 4), function(x) {x / max(abs(x), na.rm = TRUE)})
+    
+    # return the current batch
+    return(list(X))
+  }
+}
+```
+
+```{r}
+## predict test set classes using the fitted model
+CNN_predictions <- predict_generator(
+  model, 
+  test.data.generator(music.test$Index, batch.size, sample_length),
+  steps = ceiling(length(music.test$Index) / batch.size)
+)
+```
 
