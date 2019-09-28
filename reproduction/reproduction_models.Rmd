@@ -73,9 +73,6 @@ format.as.train <- function (x.df) {
   # return the transformed/formatted dataframe
   return(x.reordered)
 }
-
-# call the function
-music.descriptors <- format.as.train(music.descriptors)
 ```
 
 Using the identical 80/20/20 train/validation/test split from Simple_CNN_Model.
@@ -96,6 +93,11 @@ music.descriptors.train <- setdiff(music.descriptors, music.descriptors.test)
 # divide out an additional 20% of the dataset for the validation set
 music.descriptors.validation <- music.descriptors.train %>% group_by(genre) %>% sample_n(0.2 * songs.per.genre) %>% ungroup()
 music.descriptors.train <- setdiff(music.descriptors.train, music.descriptors.validation)
+
+# indepently transform and scale the three sets
+music.descriptors.train <- format.as.train(music.descriptors.train)
+music.descriptors.validation <- format.as.train(music.descriptors.validation)
+music.descriptors.test <- format.as.train(music.descriptors.test)
 ```
 
 Fit a random forest model. Using the optimized parameters from the previous dataset rather than retuning.
@@ -105,23 +107,23 @@ Fit a random forest model. Using the optimized parameters from the previous data
 randomForest(genre ~ ., data = select(music.descriptors.train, -song), strata = train.set$genre, ntree = 2000, mtry = 70, nodesize = 31)
 ```
 
-With the balanced dataset, the random forest model is performing significantly better, giving an out-of-bag accuracy of ~55%, not too far off the optimized CNN model using the MFCC descriptors. It is possible that tuning of the random forest hyperparameters would provide further increases in accuracy.
+With the balanced dataset, the random forest model is performing significantly better, giving an out-of-bag accuracy of ~45%, a ~10% improvement over the imbalanced dataset, but behind the optimized CNN model using the MFCC descriptors. It is possible that tuning of the random forest hyperparameters would provide further increases in accuracy.
 
 There is likely at least some information unique to one of the waveform descriptors used here or the MFCC descriptors, and we therefore might expect improved performance from a model using both. We will also test out the simple FFNN fit previously, as it would be straightforward to merge into the CNN model.
 
 ```{r}
 # convert the training and validation sets into the matrix format required by keras
 train.set.X <- as.matrix(select(music.descriptors.train, -genre, -song))
-train.set.Y <- to_categorical(as.numeric(music.descriptors.train$genre))
+train.set.Y <- to_categorical(as.numeric(music.descriptors.train$genre))[, 2:8]
 validation.set.X <- as.matrix(select(music.descriptors.validation, -genre, -song))
-validation.set.Y <- to_categorical(as.numeric(music.descriptors.validation$genre))
+validation.set.Y <- to_categorical(as.numeric(music.descriptors.validation$genre))[, 2:8]
 
 # define the model
 model <- keras_model_sequential()
 model %>%
-  layer_dense(units = 50, activation = "relu", input_shape = 191) %>%
+  layer_dense(units = 64, activation = "relu", input_shape = 191) %>%
   layer_dropout(rate = 0.5) %>%
-  layer_dense(units = 50, activation = "relu") %>%
+  layer_dense(units = 64, activation = "relu") %>%
   layer_dropout(rate = 0.5) %>%
   layer_dense(units = dim(train.set.Y)[2], activation = "softmax")
   
@@ -130,8 +132,18 @@ compile(model, loss = "categorical_crossentropy", optimizer = optimizer_adadelta
 
 # fit the model
 nnet.training <- fit(model, x = train.set.X, y = train.set.Y, 
-                     epochs = 100, initial_epoch = 0, batch_size = 100, verbose = 1,
+                     epochs = 50, initial_epoch = 0, batch_size = 128, verbose = 1,
                      validation_data = list(validation.set.X, validation.set.Y))
 ```
 
-This network reaches ~50% validation accuracy before it begins to overfit.
+This network reaches ~55% validation accuracy before it begins to overfit around epoch 50.
+
+```{r}
+## predict test set classes using the fitted model
+# format the test set into a matrix
+test.set.X <- as.matrix(select(music.descriptors.test, -genre, -song))
+
+# make predictions on the test set
+descriptors_prediction <- predict(model, test.set.X)
+```
+
